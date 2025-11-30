@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Anchor Worm Detector</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for better mobile visibility and UI */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fb;
+        }
+        .container {
+            max-width: 500px;
+        }
+        video, canvas {
+            display: block;
+            width: 100%;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3b82f6; /* Blue */
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="p-4 flex items-center justify-center min-h-screen">
+    <div class="container bg-white p-6 rounded-xl shadow-2xl w-full">
+        <h1 class="text-2xl font-bold text-center text-indigo-700 mb-6">Anchor Worm Detector</h1>
+
+        <!-- Video Stream Area -->
+        <div id="video-area" class="space-y-4">
+            <video id="webcam" autoplay playsinline class="bg-gray-200 h-64 object-cover"></video>
+            <p class="text-sm text-center text-gray-500">Focus the camera on the affected area of the fish.</p>
+        </div>
+
+        <!-- Canvas for Image Capture (Hidden) -->
+        <canvas id="canvas" class="hidden"></canvas>
+
+        <!-- Control Buttons -->
+        <div class="mt-6 flex flex-col space-y-3">
+            <button id="captureBtn" class="bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-4 rounded-lg transition duration-150 shadow-md active:scale-95">
+                Capture & Analyze Image
+            </button>
+            <button id="startBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition duration-150 shadow-md active:scale-95 hidden">
+                Start Camera
+            </button>
+        </div>
+
+        <!-- Result Display Area -->
+        <div id="resultBox" class="mt-6 p-5 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50 min-h-[80px] flex flex-col justify-center items-center">
+            <p id="statusText" class="text-lg font-medium text-gray-600">Camera not started.</p>
+            <div id="loader" class="loader hidden mt-2"></div>
+        </div>
+
+        <!-- Custom Modal for Messages (Replacing alert/confirm) -->
+        <div id="modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center p-4 z-50">
+            <div class="bg-white p-6 rounded-lg shadow-xl max-w-sm w-full">
+                <h3 class="text-xl font-bold text-red-600 mb-4">Error</h3>
+                <p id="modalMessage" class="text-gray-700 mb-6"></p>
+                <button onclick="document.getElementById('modal').classList.add('hidden')" class="w-full bg-red-500 hover:bg-red-600 text-white font-semibold py-2 rounded-lg">Close</button>
+            </div>
+        </div>
+
+    </div>
+
+    <script type="module">
+        // --- Globals ---
+        const webcam = document.getElementById('webcam');
+        const canvas = document.getElementById('canvas');
+        const captureBtn = document.getElementById('captureBtn');
+        const startBtn = document.getElementById('startBtn');
+        const statusText = document.getElementById('statusText');
+        const loader = document.getElementById('loader');
+        let stream = null;
+
+        // --- API Setup ---
+        // Note: The API Key is automatically handled by the environment if left as an empty string.
+        const apiKey = ""; 
+        const API_URL = https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey};
+        
+        // --- Utility Functions ---
+
+        /**
+         * Shows a custom modal message (replaces window.alert)
+         * @param {string} message The message to display.
+         */
+        function showMessage(message) {
+            const modal = document.getElementById('modal');
+            document.getElementById('modalMessage').textContent = message;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        /**
+         * Retry mechanism for API calls using exponential backoff.
+         * @param {function} fn The function to execute (the API call).
+         * @param {number} retries Remaining retries.
+         * @param {number} delay Current delay in ms.
+         */
+        async function fetchWithRetry(fn, retries = 3, delay = 1000) {
+            try {
+                return await fn();
+            } catch (error) {
+                if (retries === 0) throw error;
+                // Exponential backoff
+                await new Promise(resolve => setTimeout(resolve, delay));
+                return fetchWithRetry(fn, retries - 1, delay * 2);
+            }
+        }
+
+
+        // --- Camera Control ---
+
+        /**
+         * Starts the camera stream.
+         */
+        async function startCamera() {
+            try {
+                statusText.textContent = 'Awaiting camera permission...';
+                // Request access to the video stream
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                
+                // Attach the stream to the video element
+                webcam.srcObject = stream;
+                webcam.classList.remove('hidden');
+                captureBtn.classList.remove('hidden');
+                startBtn.classList.add('hidden');
+                statusText.textContent = 'Camera ready. Capture image for analysis.';
+            } catch (err) {
+                console.error("Error accessing camera: ", err);
+                statusText.textContent = 'Camera access failed.';
+                showMessage('Error: Could not access camera. Please check permissions.');
+                captureBtn.classList.add('hidden');
+                startBtn.classList.remove('hidden');
+            }
+        }
+
+        /**
+         * Stops the camera stream.
+         */
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                webcam.srcObject = null;
+                stream = null;
+            }
+        }
+
+
+        // --- Analysis Logic ---
+
+        /**
+         * Captures a frame from the video stream and sends it to the Gemini API for analysis.
+         */
+        async function captureImage() {
+            if (!stream) {
+                showMessage('Error: Camera not started. Please click "Start Camera" first.');
+                return;
+            }
+
+            // Set canvas dimensions to match the video feed
+            canvas.width = webcam.videoWidth;
+            canvas.height = webcam.videoHeight;
+            const context = canvas.getContext('2d');
+            
+            // Draw the current video frame onto the canvas
+            context.drawImage(webcam, 0, 0, canvas.width, canvas.height);
+
+            // Convert the canvas image to a Base64 string
+            const base64Image = canvas.toDataURL('image/jpeg').split(',')[1];
+            
+            // stopCamera(); // Stop the camera after capture to save resources
+            webcam.classList.add('opacity-50');
+            captureBtn.disabled = true;
+            statusText.textContent = 'Analyzing image...';
+            loader.classList.remove('hidden');
+
+            try {
+                await fetchWithRetry(() => analyzeImage(base64Image));
+            } catch (error) {
+                console.error("API call failed after retries:", error);
+                statusText.innerHTML = '<span class="text-red-600 font-bold">Analysis Failed.</span>';
+                showMessage('An unexpected error occurred during analysis. Please try again.');
+            } finally {
+                webcam.classList.remove('opacity-50');
+                captureBtn.disabled = false;
+                loader.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Calls the Gemini API to analyze the image.
+         * @param {string} base64Image The base64 encoded image data.
+         */
+        async function analyzeImage(base64Image) {
+            const systemPrompt = "You are an expert fish disease diagnostic tool. Your sole task is to analyze the provided image of a fish and determine if the external parasite known as 'Anchor Worm' (Lernaea) is present. Respond only with one of two specific phrases: 'yes it\'s perfect' if the anchor worm is NOT present (i.e., the fish appears healthy in this regard), or 'No, anchor worm is present' if it IS present. Do not add any other text, explanation, or punctuation.";
+            const userQuery = "Analyze the fish image for the presence of Anchor Worm (Lernaea).";
+            
+            const payload = {
+                contents: [
+                    {
+                        role: "user",
+                        parts: [
+                            { text: userQuery },
+                            {
+                                inlineData: {
+                                    mimeType: "image/jpeg",
+                                    data: base64Image
+                                }
+                            }
+                        ]
+                    }
+                ],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                },
+            };
+
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const errorBody = await response.text();
+                throw new Error(API Error: ${response.status} - ${errorBody});
+            }
+
+            const result = await response.json();
+            const text = result.candidates?.[0]?.content?.parts?.[0]?.text || 'Error: Could not get a reliable answer.';
+
+            // Display the result
+            const displayColor = text.toLowerCase().includes('perfect') ? 'text-green-600' : 'text-red-600';
+            statusText.innerHTML = <span class="font-extrabold text-2xl ${displayColor}">${text}</span>;
+            
+            return text;
+        }
+
+        // --- Event Listeners and Initialization ---
+
+        window.onload = () => {
+            captureBtn.addEventListener('click', captureImage);
+            startBtn.addEventListener('click', startCamera);
+
+            // Try to start the camera automatically on load
+            startCamera();
+        };
+
+        // If the user navigates away or closes, stop the stream
+        window.addEventListener('beforeunload', stopCamera);
+
+    </script>
+</body>
+</html>
