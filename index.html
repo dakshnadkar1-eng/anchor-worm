@@ -2,352 +2,110 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fish Health Monitor (Anchor Worm Detector)</title>
-    <!-- Load Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Anchor Worm Detector</title>
     <style>
-        /* Custom styles for a clean, modern look */
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #eef2ff; /* Light indigo background */
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 1rem;
-        }
-        .container {
-            max-width: 420px;
-            width: 100%;
-            background-color: white;
-            border-radius: 1.5rem;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-            padding: 1.5rem;
-        }
-        #video-feed {
-            width: 100%;
-            border-radius: 1rem;
-            background-color: #000;
-            display: block;
-            object-fit: cover;
-            aspect-ratio: 4/3; /* Common photo aspect ratio */
-        }
-        #canvas-output {
-            width: 100%;
-            border-radius: 1rem;
-            background-color: #000;
-            display: none; /* Hidden until capture */
-            object-fit: cover;
-            aspect-ratio: 4/3;
-        }
+        body { text-align: center; font-family: Arial, sans-serif; padding: 20px; }
+        h1 { color: darkgreen; }
+        button { padding: 10px 20px; margin: 10px; font-size: 16px; cursor: pointer; }
+        #preview { max-width: 300px; display: none; margin-top: 10px; }
+        #result { font-size: 18px; margin-top: 20px; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h1 class="text-3xl font-extrabold text-indigo-700 mb-4 text-center">
-            Anchor Worm Detector
-        </h1>
-        <p id="status-message" class="text-center mb-6 text-gray-600">
-            Tap 'Start Camera' to begin the fish health check.
-        </p>
+    <h1>Anchor Worm Detector</h1>
+    <p>Capture an image of the fish to check if it’s healthy or affected.</p>
 
-        <!-- Video and Canvas Area -->
-        <div class="mb-6 relative">
-            <!-- Video Feed (Camera Input) -->
-            <video id="video-feed" playsinline autoplay></video>
-            
-            <!-- Canvas (Captured Image Output) -->
-            <canvas id="canvas-output" class="hidden"></canvas>
-            
-            <!-- Loading Indicator Overlay -->
-            <div id="loading-overlay" class="absolute inset-0 bg-white bg-opacity-70 flex flex-col justify-center items-center rounded-xl hidden">
-                <svg class="animate-spin -ml-1 mr-3 h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <p class="mt-3 text-indigo-700 font-semibold">Analyzing Image...</p>
-            </div>
-        </div>
+    <button onclick="startCamera()">📷 Open Camera</button>
+    <button onclick="restart()">🔁 Restart</button>
+    <br>
 
-        <!-- Result Display Area -->
-        <div id="result-box" class="p-4 rounded-lg text-center font-bold text-xl mb-6 hidden transition-all duration-300 transform scale-95">
-            <!-- Result text will be injected here -->
-        </div>
+    <video id="camera" width="300" autoplay style="display:none;"></video>
+    <canvas id="canvas" width="300" height="200" style="display:none;"></canvas>
+    <br>
+    <button id="captureBtn" onclick="capture()" style="display:none;">📸 Capture Image</button>
 
-        <!-- Controls -->
-        <div id="controls" class="flex justify-between space-x-3">
-            <button id="start-camera-button" class="flex-1 px-4 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-300 transition duration-150">
-                Start Camera
-            </button>
-            <button id="capture-button" class="flex-1 px-4 py-3 bg-blue-500 text-white font-semibold rounded-xl hover:bg-blue-600 focus:outline-none focus:ring-4 focus:ring-blue-300 transition duration-150 hidden" disabled>
-                Capture Image
-            </button>
-            <button id="restart-button" class="flex-1 px-4 py-3 bg-red-500 text-white font-semibold rounded-xl hover:bg-red-600 focus:outline-none focus:ring-4 focus:ring-red-300 transition duration-150 hidden">
-                Restart
-            </button>
-        </div>
-    </div>
+    <img id="preview" alt="Captured Image" />
+    <p id="result"></p>
 
-    <script type="module">
-        // Global element references
-        const videoFeed = document.getElementById('video-feed');
-        const canvasOutput = document.getElementById('canvas-output');
-        const ctx = canvasOutput.getContext('2d');
-        const startCameraButton = document.getElementById('start-camera-button');
-        const captureButton = document.getElementById('capture-button');
-        const restartButton = document.getElementById('restart-button');
-        const statusMessage = document.getElementById('status-message');
-        const resultBox = document.getElementById('result-box');
-        const loadingOverlay = document.getElementById('loading-overlay');
+    <script>
+        let video = document.getElementById('camera');
+        let canvas = document.getElementById('canvas');
+        let preview = document.getElementById('preview');
+        let captureBtn = document.getElementById('captureBtn');
+        let result = document.getElementById('result');
+        let stream;
 
-        // Global variables
-        let videoStream = null;
-        const modelName = 'gemini-2.5-flash-preview-09-2025';
-        const apiKey = ""; // API key is handled by the environment
+        // Sample reference images (base64) – very small for demo
+        // Reference healthy image (greenish color pattern)
+        const healthyRGB = [120, 180, 120];
 
-        // --- Helper Functions ---
+        // Reference infected image (reddish/orange tone near worm area)
+        const infectedRGB = [200, 100, 100];
 
-        /**
-         * Converts the captured canvas image to a Base64 string (JPEG format).
-         * @returns {string} Base64 image data.
-         */
-        function canvasToBase64() {
-            // Convert to JPEG for smaller payload size
-            const base64 = canvasOutput.toDataURL('image/jpeg', 0.9).split(',')[1];
-            return base64;
+        function startCamera() {
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(s => {
+                    stream = s;
+                    video.srcObject = stream;
+                    video.style.display = "block";
+                    captureBtn.style.display = "inline-block";
+                })
+                .catch(err => alert("Camera not accessible: " + err));
         }
 
-        /**
-         * Resets the UI and state to the initial camera ready mode.
-         */
-        function resetApp() {
-            // Stop any active video stream
-            if (videoStream) {
-                videoStream.getTracks().forEach(track => track.stop());
-                videoStream = null;
+        function capture() {
+            let ctx = canvas.getContext('2d');
+            canvas.style.display = "block";
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            preview.src = canvas.toDataURL();
+            preview.style.display = "block";
+            analyzeImage();
+        }
+
+        function analyzeImage() {
+            let ctx = canvas.getContext('2d');
+            let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+            let r = 0, g = 0, b = 0, count = 0;
+
+            // Sample pixel averages (basic color similarity test)
+            for (let i = 0; i < imgData.length; i += 50) { 
+                r += imgData[i];
+                g += imgData[i + 1];
+                b += imgData[i + 2];
+                count++;
             }
 
-            // Reset UI visibility
-            videoFeed.classList.remove('hidden');
-            canvasOutput.classList.add('hidden');
-            startCameraButton.classList.remove('hidden');
-            captureButton.classList.add('hidden');
-            restartButton.classList.add('hidden');
-            captureButton.disabled = true;
-            resultBox.classList.add('hidden');
-            loadingOverlay.classList.add('hidden');
+            r = Math.floor(r / count);
+            g = Math.floor(g / count);
+            b = Math.floor(b / count);
 
-            // Reset status message
-            statusMessage.textContent = "Tap 'Start Camera' to begin the fish health check.";
-            resultBox.textContent = '';
+            let healthyScore = Math.abs(r - healthyRGB[0]) + Math.abs(g - healthyRGB[1]) + Math.abs(b - healthyRGB[2]);
+            let infectedScore = Math.abs(r - infectedRGB[0]) + Math.abs(g - infectedRGB[1]) + Math.abs(b - infectedRGB[2]);
+
+            if (healthyScore < infectedScore) {
+                result.innerHTML = "🟢 Possibly Healthy Fish";
+                result.style.color = "green";
+            } else {
+                result.innerHTML = "🔴 Possibly Infected (check for Anchor Worm)";
+                result.style.color = "red";
+            }
+
+            stopCamera();
         }
 
-        /**
-         * Converts raw JSON text response from the model into a standard result string.
-         * @param {string} jsonText - The raw JSON string from the model.
-         * @returns {string} The final result string (e.g., "Worm is Present").
-         */
-        function formatResult(jsonText) {
-            try {
-                const parsed = JSON.parse(jsonText);
-                const isHealthy = parsed.isHealthy;
-                
-                if (isHealthy === true) {
-                    resultBox.className = "p-4 rounded-lg text-center font-bold text-xl mb-6 bg-green-100 text-green-700 transition-all duration-300 transform scale-100";
-                    return "YES, Fish is Healthy";
-                } else if (isHealthy === false) {
-                    resultBox.className = "p-4 rounded-lg text-center font-bold text-xl mb-6 bg-red-100 text-red-700 transition-all duration-300 transform scale-100";
-                    return "Worm is Present";
-                } else {
-                    resultBox.className = "p-4 rounded-lg text-center font-bold text-xl mb-6 bg-yellow-100 text-yellow-700 transition-all duration-300 transform scale-100";
-                    return "Analysis Inconclusive. Try a clearer image.";
-                }
-            } catch (error) {
-                console.error("Failed to parse model output:", error, "Raw text:", jsonText);
-                resultBox.className = "p-4 rounded-lg text-center font-bold text-xl mb-6 bg-yellow-100 text-yellow-700 transition-all duration-300 transform scale-100";
-                return "Analysis Error: Cannot determine health status.";
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                video.style.display = "none";
+                captureBtn.style.display = "none";
             }
         }
 
-        // --- Core Functions ---
-
-        /**
-         * Handles the click event for the Start Camera button.
-         */
-        async function startCamera() {
-            statusMessage.textContent = "Loading camera feed...";
-            try {
-                // Request access to the user's camera (preferring environment or rear camera on mobile)
-                videoStream = await navigator.mediaDevices.getUserMedia({
-                    video: {
-                        facingMode: { ideal: "environment" } // Prioritize rear camera for better capture
-                    }
-                });
-                
-                videoFeed.srcObject = videoStream;
-                await new Promise(resolve => videoFeed.onloadedmetadata = resolve); // Wait for video to load metadata
-
-                // Setup the canvas dimensions to match the video feed
-                canvasOutput.width = videoFeed.videoWidth;
-                canvasOutput.height = videoFeed.videoHeight;
-
-                // Update UI state
-                startCameraButton.classList.add('hidden');
-                captureButton.classList.remove('hidden');
-                captureButton.disabled = false;
-                statusMessage.textContent = "Position the fish clearly and tap 'Capture Image'.";
-                resultBox.classList.add('hidden');
-
-            } catch (error) {
-                console.error("Error accessing camera:", error);
-                statusMessage.textContent = "Error: Could not access camera. Please check permissions.";
-                startCameraButton.classList.remove('hidden');
-                captureButton.classList.add('hidden');
-            }
+        function restart() {
+            window.location.reload();
         }
-
-        /**
-         * Handles the click event for the Capture Image button.
-         */
-        async function captureImage() {
-            // Stop the video stream and draw the frame to the canvas
-            if (videoStream) {
-                videoStream.getTracks().forEach(track => track.stop());
-                videoStream = null;
-            }
-
-            // Draw the current frame onto the canvas
-            ctx.drawImage(videoFeed, 0, 0, canvasOutput.width, canvasOutput.height);
-            
-            // Update UI state
-            videoFeed.classList.add('hidden');
-            canvasOutput.classList.remove('hidden');
-            captureButton.classList.add('hidden');
-            startCameraButton.classList.add('hidden');
-            loadingOverlay.classList.remove('hidden');
-            statusMessage.textContent = "Image captured. Sending to AI for analysis...";
-            
-            await analyzeImage();
-        }
-
-        /**
-         * Sends the captured image to the Gemini API for analysis.
-         */
-        async function analyzeImage() {
-            const base64ImageData = canvasToBase64();
-
-            // The strict instruction to the model to enforce the requested output format and confidence.
-            const systemPrompt = `You are an expert veterinary technician specializing in fish health. Your task is to detect the presence of the parasitic Anchor Worm (Lernaea) in the provided image of a fish. 
-                
-                CRITICAL INSTRUCTION: You MUST only respond with a single JSON object. DO NOT include any text outside the JSON object.
-
-                JSON SCHEMA:
-                {
-                    "isHealthy": boolean
-                }
-                
-                - If you detect a parasitic Anchor Worm (a small, thread-like crustacean embedded in the fish's skin, often with a visible white/green body and a red inflammation point), set "isHealthy" to false.
-                - If the fish appears completely clear of Anchor Worms and related visible symptoms, set "isHealthy" to true.
-                - Only respond with TRUE if you are absolutely certain no worm is present.
-            `;
-
-            const userQuery = "Analyze this image for the presence of the Anchor Worm parasite. Be extremely conservative and only state TRUE if there are absolutely no signs of the worm. Otherwise, state FALSE.";
-            
-            const url = https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey};
-
-            // Implemented retry logic with exponential backoff for robustness
-            const maxRetries = 3;
-            let resultText = "Analysis Failed";
-
-            for (let i = 0; i < maxRetries; i++) {
-                try {
-                    const payload = {
-                        contents: [
-                            {
-                                role: "user",
-                                parts: [
-                                    { text: userQuery },
-                                    {
-                                        inlineData: {
-                                            mimeType: "image/jpeg",
-                                            data: base64ImageData
-                                        }
-                                    }
-                                ]
-                            }
-                        ],
-                        systemInstruction: {
-                            parts: [{ text: systemPrompt }]
-                        },
-                        generationConfig: {
-                             // Force JSON output
-                             responseMimeType: "application/json",
-                             responseSchema: {
-                                 type: "OBJECT",
-                                 properties: {
-                                     "isHealthy": { "type": "BOOLEAN" }
-                                 },
-                                 propertyOrdering: ["isHealthy"]
-                             }
-                        }
-                    };
-
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error(API error: ${response.statusText});
-                    }
-
-                    const result = await response.json();
-                    
-                    // Extract the JSON string from the response
-                    const jsonPart = result?.candidates?.[0]?.content?.parts?.[0]?.text;
-                    
-                    if (jsonPart) {
-                        resultText = formatResult(jsonPart);
-                        break; // Success, break the retry loop
-                    } else {
-                        throw new Error("Received empty or malformed response from the model.");
-                    }
-
-                } catch (error) {
-                    console.error(Attempt ${i + 1} failed:, error);
-                    if (i < maxRetries - 1) {
-                        // Wait using exponential backoff: 1s, 2s, 4s
-                        const delay = Math.pow(2, i) * 1000;
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                    } else {
-                        // Last attempt failed
-                        resultBox.className = "p-4 rounded-lg text-center font-bold text-xl mb-6 bg-gray-200 text-gray-700 transition-all duration-300 transform scale-100";
-                        resultText = "Critical Error: Could not connect to AI service.";
-                    }
-                }
-            }
-            
-            // Final UI update after analysis
-            loadingOverlay.classList.add('hidden');
-            resultBox.textContent = resultText;
-            resultBox.classList.remove('hidden');
-            restartButton.classList.remove('hidden');
-            statusMessage.textContent = "Analysis complete.";
-        }
-
-
-        // --- Event Listeners and Initialization ---
-
-        startCameraButton.addEventListener('click', startCamera);
-        captureButton.addEventListener('click', captureImage);
-        restartButton.addEventListener('click', resetApp);
-        
-        // Initial setup
-        window.onload = resetApp;
-
     </script>
 </body>
 </html>
