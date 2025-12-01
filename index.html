@@ -50,12 +50,17 @@ window.onload = async () => {
 
         // your code exactly from the screenshot
         inferEngine
-            .startWorker("my-first-project-kgrjk", "8", "rf_97jS1XP5e5fkkmqc8gR1rspyDkj1")
-            .then(function(id) {
-                workerId = id;
-                result.innerHTML = "🤖 AI Ready! Capture image.";
-                result.style.color = "green";
-            });
+  .startWorker("my-first-project-kgrjk", "8", "rf_97jS1XP5e5fkkmqc8gR1rspyDkj1")
+  .then(function(id) {
+      workerId = id;
+      result.innerHTML = "🤖 AI Ready! Capture image.";
+      result.style.color = "green";
+  })
+  .catch(function(error) {
+      result.innerHTML = "❌ AI Load Failed! Check Console";
+      result.style.color = "red";
+      console.error("AI Load Error:", error);
+  });
     } catch (err) {
         result.innerHTML = "❌ Error loading AI";
         result.style.color = "red";
