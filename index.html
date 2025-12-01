@@ -10,6 +10,9 @@
         #preview { max-width: 300px; display: none; margin-top: 10px; }
         #result { font-size: 18px; margin-top: 20px; font-weight: bold; }
     </style>
+
+    <!-- Roboflow InferenceJS -->
+    <script src="https://cdn.jsdelivr.net/npm/inferencejs"></script>
 </head>
 <body>
 
@@ -26,86 +29,117 @@
     <button id="captureBtn" onclick="capture()" style="display:none;">📸 Capture Image</button>
 
     <img id="preview" alt="Captured Image" />
-    <p id="result"></p>
+    <p id="result">⏳ Loading AI...</p>
 
     <script>
-        let video = document.getElementById('camera');
-        let canvas = document.getElementById('canvas');
-        let preview = document.getElementById('preview');
-        let captureBtn = document.getElementById('captureBtn');
-        let result = document.getElementById('result');
-        let stream;
+let video = document.getElementById('camera');
+let canvas = document.getElementById('canvas');
+let preview = document.getElementById('preview');
+let captureBtn = document.getElementById('captureBtn');
+let result = document.getElementById('result');
+let stream;
 
-        // Sample reference images (base64) – very small for demo
-        // Reference healthy image (greenish color pattern)
-        const healthyRGB = [120, 180, 120];
+let inferEngine;
+let workerId;
 
-        // Reference infected image (reddish/orange tone near worm area)
-        const infectedRGB = [200, 100, 100];
+// ===== Initialize Roboflow Inference =====
+window.onload = async () => {
+    try {
+        const { InferenceEngine, CVImage } = inferencejs;
+        inferEngine = new InferenceEngine();
 
-        function startCamera() {
-            navigator.mediaDevices.getUserMedia({ video: true })
-                .then(s => {
-                    stream = s;
-                    video.srcObject = stream;
-                    video.style.display = "block";
-                    captureBtn.style.display = "inline-block";
-                })
-                .catch(err => alert("Camera not accessible: " + err));
-        }
-
-        function capture() {
-            let ctx = canvas.getContext('2d');
-            canvas.style.display = "block";
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            preview.src = canvas.toDataURL();
-            preview.style.display = "block";
-            analyzeImage();
-        }
-
-        function analyzeImage() {
-            let ctx = canvas.getContext('2d');
-            let imgData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-
-            let r = 0, g = 0, b = 0, count = 0;
-
-            // Sample pixel averages (basic color similarity test)
-            for (let i = 0; i < imgData.length; i += 50) { 
-                r += imgData[i];
-                g += imgData[i + 1];
-                b += imgData[i + 2];
-                count++;
-            }
-
-            r = Math.floor(r / count);
-            g = Math.floor(g / count);
-            b = Math.floor(b / count);
-
-            let healthyScore = Math.abs(r - healthyRGB[0]) + Math.abs(g - healthyRGB[1]) + Math.abs(b - healthyRGB[2]);
-            let infectedScore = Math.abs(r - infectedRGB[0]) + Math.abs(g - infectedRGB[1]) + Math.abs(b - infectedRGB[2]);
-
-            if (healthyScore < infectedScore) {
-                result.innerHTML = "🟢 Possibly Healthy Fish";
+        // your code exactly from the screenshot
+        inferEngine
+            .startWorker("my-first-project-kgrjk", "8", "rf_97jS1XP5e5fkkmqc8gR1rspyDkj1")
+            .then(function(id) {
+                workerId = id;
+                result.innerHTML = "🤖 AI Ready! Capture image.";
                 result.style.color = "green";
-            } else {
-                result.innerHTML = "🔴 Possibly Infected (check for Anchor Worm)";
+            });
+    } catch (err) {
+        result.innerHTML = "❌ Error loading AI";
+        result.style.color = "red";
+        console.error(err);
+    }
+};
+
+// Start Rear Camera
+function startCamera() {
+    navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false
+    })
+    .then(s => {
+        stream = s;
+        video.srcObject = stream;
+        video.style.display = "block";
+        captureBtn.style.display = "inline-block";
+    })
+    .catch(err => alert("Camera not accessible: " + err));
+}
+
+// Capture Image
+function capture() {
+    let ctx = canvas.getContext('2d');
+    canvas.style.display = "block";
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    preview.src = canvas.toDataURL();
+    preview.style.display = "block";
+    detectWithAI();
+}
+
+// Roboflow Detection
+async function detectWithAI() {
+    if (!workerId) {
+        result.innerHTML = "⚠️ AI still loading...";
+        result.style.color = "orange";
+        return;
+    }
+
+    result.innerHTML = "🔍 Detecting...";
+    result.style.color = "blue";
+
+    const { CVImage } = inferencejs;
+    const image = new CVImage(preview);
+
+    inferEngine.infer(workerId, image).then(predictions => {
+        console.log(predictions);
+
+        if (predictions.length > 0) {
+            let best = predictions[0];
+            if (best.confidence > 0.7) {
+                result.innerHTML = "🔴 Anchor Worm Detected!";
                 result.style.color = "red";
+            } else {
+                result.innerHTML = "🟠 Suspicious — Low Confidence!";
+                result.style.color = "orange";
             }
-
-            stopCamera();
+        } else {
+            result.innerHTML = "🟢 Fish appears healthy!";
+            result.style.color = "green";
         }
 
-        function stopCamera() {
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                video.style.display = "none";
-                captureBtn.style.display = "none";
-            }
-        }
+        stopCamera();
+    }).catch(err => {
+        result.innerHTML = "❌ Detection Failed!";
+        result.style.color = "red";
+        console.error(err);
+    });
+}
 
-        function restart() {
-            window.location.reload();
-        }
+// Stop Camera
+function stopCamera() {
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        video.style.display = "none";
+        captureBtn.style.display = "none";
+    }
+}
+
+// Restart
+function restart() {
+    window.location.reload();
+}
     </script>
 </body>
 </html>
