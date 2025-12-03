@@ -1,145 +1,263 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Anchor Worm Detector</title>
-    <style>
-        body { text-align: center; font-family: Arial, sans-serif; padding: 20px; }
-        h1 { color: darkgreen; }
-        button { padding: 10px 20px; margin: 10px; font-size: 16px; cursor: pointer; }
-        #preview { max-width: 300px; display: none; margin-top: 10px; }
-        #result { font-size: 18px; margin-top: 20px; font-weight: bold; }
-    </style>
-
-    <!-- Roboflow InferenceJS -->
-    <script src="https://cdn.jsdelivr.net/npm/inferencejs"></script>
+<meta charset="utf-8" />
+<title>Fish Detector — Camera Capture + Roboflow</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; background:#f6f8fb; color:#111; text-align:center; padding:18px; }
+  h1 { margin-bottom:6px; }
+  .video-box, .preview-box { display:inline-block; margin:10px; vertical-align:top; }
+  video, img { width:320px; max-width:92vw; border-radius:10px; border:2px solid #333; background:#000; }
+  #controls { margin-top:12px; }
+  button { padding:10px 16px; margin:6px; font-size:16px; border-radius:8px; cursor:pointer; border:0; }
+  #captureBtn { background:#0b79ff; color:white; }
+  #sendBtn { background:#10a37f; color:white; }
+  #restartBtn { background:#ff4d4d; color:white; }
+  #loading { display:none; margin-top:14px; }
+  .spinner { width:44px; height:44px; border-radius:50%; border:6px solid #e2e6ea; border-top:6px solid #0b79ff; margin:8px auto; animation:spin 1s linear infinite; }
+  @keyframes spin { from { transform:rotate(0);} to { transform:rotate(360deg);} }
+  #results { margin-top:14px; width:88%; max-width:640px; margin-left:auto; margin-right:auto; text-align:left; background:white; padding:12px; border-radius:10px; box-shadow:0 6px 18px rgba(0,0,0,0.06); }
+  .class-row { display:flex; justify-content:space-between; padding:6px 8px; border-bottom:1px solid #efefef; font-weight:600; }
+  .class-name { color:#0b79ff; }
+  .class-score { color:#333; font-weight:700; }
+  .no-detect { text-align:center; color:#d9534f; font-weight:700; padding:12px; }
+  .hint { font-size:13px; color:#666; margin-top:8px; }
+</style>
 </head>
 <body>
 
-    <h1>Anchor Worm Detector</h1>
-    <p>Capture an image of the fish to check if it’s healthy or affected.</p>
+<h1>Fish Disease Detector</h1>
+<div class="hint">Camera → Capture (shows preview) → Send to AI → Results shown below</div>
 
-    <button onclick="startCamera()">📷 Open Camera</button>
-    <button onclick="restart()">🔁 Restart</button>
-    <br>
+<div style="margin-top:14px;">
+  <div class="video-box">
+    <div><strong>Live Camera</strong></div>
+    <video id="camera" autoplay playsinline></video>
+  </div>
 
-    <video id="camera" width="300" autoplay style="display:none;"></video>
-    <canvas id="canvas" width="300" height="200" style="display:none;"></canvas>
-    <br>
-    <button id="captureBtn" onclick="capture()" style="display:none;">📸 Capture Image</button>
+  <div class="preview-box">
+    <div><strong>Captured Image</strong></div>
+    <img id="preview" alt="Captured preview will appear here" />
+  </div>
+</div>
 
-    <img id="preview" alt="Captured Image" />
-    <p id="result">⏳ Loading AI...</p>
+<div id="controls">
+  <button id="captureBtn">Capture</button>
+  <button id="sendBtn" disabled>Send to AI</button>
+  <button id="restartBtn">Restart</button>
+  <input id="upload" type="file" accept="image/*" style="margin-left:10px;" />
+</div>
 
-    <script>
-let video = document.getElementById('camera');
-let canvas = document.getElementById('canvas');
-let preview = document.getElementById('preview');
-let captureBtn = document.getElementById('captureBtn');
-let result = document.getElementById('result');
-let stream;
+<div id="loading">
+  <div class="spinner"></div>
+  <div>Processing… please wait</div>
+</div>
 
-let inferEngine;
-let workerId;
+<div id="results" aria-live="polite">
+  <div style="text-align:center; color:#666; padding:12px;">Results will appear here after sending image</div>
+</div>
 
-// ===== Initialize Roboflow Inference =====
-window.onload = async () => {
-    try {
-        const { InferenceEngine, CVImage } = inferencejs;
-        inferEngine = new InferenceEngine();
+<script>
+/* ---------- CONFIG: your workflow URL + API key (already set) ---------- */
+const WORKFLOW_URL = "https://serverless.roboflow.com/daksh-ww3ps/workflows/custom-workflow";
+const API_KEY = "sNEzjzd1UjaEuybTjdqf";
+/* --------------------------------------------------------------------- */
 
-        // your code exactly from the screenshot
-        inferEngine
-            .startWorker("my-first-project-kgrjk", "8", "rf_97jS1XP5e5fkkmqc8gR1rspyDkj1")
-            .then(function(id) {
-                workerId = id;
-                result.innerHTML = "🤖 AI Ready! Capture image.";
-                result.style.color = "green";
-            });
-    } catch (err) {
-        result.innerHTML = "❌ Error loading AI";
-        result.style.color = "red";
-        console.error(err);
-    }
-};
+const cameraEl = document.getElementById('camera');
+const previewEl = document.getElementById('preview');
+const captureBtn = document.getElementById('captureBtn');
+const sendBtn = document.getElementById('sendBtn');
+const restartBtn = document.getElementById('restartBtn');
+const uploadEl = document.getElementById('upload');
+const loadingEl = document.getElementById('loading');
+const resultsEl = document.getElementById('results');
 
-// Start Rear Camera
-function startCamera() {
-    navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-        audio: false
-    })
-    .then(s => {
-        stream = s;
-        video.srcObject = stream;
-        video.style.display = "block";
-        captureBtn.style.display = "inline-block";
-    })
-    .catch(err => alert("Camera not accessible: " + err));
+let latestBase64 = null; // holds captured/uploaded image dataURL
+
+// start camera (try environment/back camera)
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+    cameraEl.srcObject = stream;
+  } catch (err) {
+    console.error("Camera start failed:", err);
+    resultsEl.innerHTML = '<div class="no-detect">Unable to access camera. Allow camera permission or use the upload button.</div>';
+  }
+}
+startCamera();
+
+// Capture frame into preview but do NOT send automatically
+captureBtn.addEventListener('click', () => {
+  if (!cameraEl.videoWidth || !cameraEl.videoHeight) {
+    alert("Camera not ready — wait a second and try again.");
+    return;
+  }
+  const c = document.createElement('canvas');
+  c.width = cameraEl.videoWidth;
+  c.height = cameraEl.videoHeight;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(cameraEl, 0, 0, c.width, c.height);
+  latestBase64 = c.toDataURL('image/jpeg', 0.9);
+  previewEl.src = latestBase64;
+  sendBtn.disabled = false;
+  resultsEl.innerHTML = '<div style="text-align:center; color:#666; padding:10px;">Preview ready. Click "Send to AI".</div>';
+});
+
+// Upload image (alternative)
+uploadEl.addEventListener('change', (evt) => {
+  const file = evt.target.files && evt.target.files[0];
+  if (!file) return;
+  const r = new FileReader();
+  r.onload = (e) => {
+    latestBase64 = e.target.result;
+    previewEl.src = latestBase64;
+    sendBtn.disabled = false;
+    resultsEl.innerHTML = '<div style="text-align:center; color:#666; padding:10px;">Preview ready. Click "Send to AI".</div>';
+  };
+  r.readAsDataURL(file);
+});
+
+// Restart button reloads page to reinit camera
+restartBtn.addEventListener('click', () => location.reload());
+
+// show/hide loading spinner and disable controls while processing
+function setLoading(on) {
+  loadingEl.style.display = on ? 'block' : 'none';
+  captureBtn.disabled = on;
+  sendBtn.disabled = on || !latestBase64;
+  uploadEl.disabled = on;
+  restartBtn.disabled = on;
 }
 
-// Capture Image
-function capture() {
-    let ctx = canvas.getContext('2d');
-    canvas.style.display = "block";
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    preview.src = canvas.toDataURL();
-    preview.style.display = "block";
-    detectWithAI();
-}
+// Robust parser: returns array of predictions (each: {class, confidence, ...})
+function extractPredictions(obj) {
+  if (!obj) return [];
+  const out = [];
 
-// Roboflow Detection
-async function detectWithAI() {
-    if (!workerId) {
-        result.innerHTML = "⚠️ AI still loading...";
-        result.style.color = "orange";
-        return;
-    }
-
-    result.innerHTML = "🔍 Detecting...";
-    result.style.color = "blue";
-
-    const { CVImage } = inferencejs;
-    const image = new CVImage(preview);
-
-    inferEngine.infer(workerId, image).then(predictions => {
-        console.log(predictions);
-
-        if (predictions.length > 0) {
-            let best = predictions[0];
-            if (best.confidence > 0.7) {
-                result.innerHTML = "🔴 Anchor Worm Detected!";
-                result.style.color = "red";
-            } else {
-                result.innerHTML = "🟠 Suspicious — Low Confidence!";
-                result.style.color = "orange";
-            }
-        } else {
-            result.innerHTML = "🟢 Fish appears healthy!";
-            result.style.color = "green";
-        }
-
-        stopCamera();
-    }).catch(err => {
-        result.innerHTML = "❌ Detection Failed!";
-        result.style.color = "red";
-        console.error(err);
+  function pushPreds(arr) {
+    if (!Array.isArray(arr)) return;
+    arr.forEach(p => {
+      // Normalize probable keys: class, label, name
+      const cls = (p.class || p.label || p.name || p.detected_class || p.label_name || p.annotation || "").toString();
+      const conf = (p.confidence || p.score || p.conf || p.probability || p.confidence_score || p.score_raw || 0);
+      out.push({ ...p, class: cls, confidence: Number(conf) });
     });
-}
+  }
 
-// Stop Camera
-function stopCamera() {
-    if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        video.style.display = "none";
-        captureBtn.style.display = "none";
+  // Common shapes:
+  if (Array.isArray(obj.predictions)) pushPreds(obj.predictions);
+  if (obj.output && Array.isArray(obj.output.predictions)) pushPreds(obj.output.predictions);
+  if (obj.outputs && Array.isArray(obj.outputs)) {
+    obj.outputs.forEach(o => {
+      if (o.predictions) pushPreds(o.predictions);
+      if (o.output && o.output.predictions) pushPreds(o.output.predictions);
+    });
+  }
+  if (obj.results && Array.isArray(obj.results)) {
+    // results may be array of objects with predictions
+    obj.results.forEach(r => {
+      if (Array.isArray(r.predictions)) pushPreds(r.predictions);
+      if (r.output && Array.isArray(r.output.predictions)) pushPreds(r.output.predictions);
+      if (r.outputs && Array.isArray(r.outputs)) r.outputs.forEach(o => o.predictions && pushPreds(o.predictions));
+    });
+    // or results.predictions
+    if (Array.isArray(obj.results.predictions)) pushPreds(obj.results.predictions);
+  }
+  if (obj.data && Array.isArray(obj.data.predictions || [])) pushPreds(obj.data.predictions);
+
+  // fallback: search for any nested 'predictions' arrays in tree (depth-limited)
+  try {
+    const stack = [obj];
+    const seen = new Set();
+    while (stack.length) {
+      const node = stack.pop();
+      if (!node || typeof node !== 'object' || seen.has(node)) continue;
+      seen.add(node);
+      if (Array.isArray(node.predictions)) pushPreds(node.predictions);
+      Object.values(node).forEach(v => {
+        if (v && typeof v === 'object') stack.push(v);
+      });
     }
+  } catch (e) { /* ignore */ }
+
+  // dedupe by stringified class+bbox+confidence if many duplicates
+  const unique = [];
+  const mem = new Set();
+  out.forEach(p => {
+    const key = `${p.class}||${JSON.stringify(p.bbox||p.box||p.bounding_box||{})}||${(p.confidence||0).toFixed(3)}`;
+    if (!mem.has(key)) { mem.add(key); unique.push(p); }
+  });
+
+  return unique;
 }
 
-// Restart
-function restart() {
-    window.location.reload();
+// Send to Roboflow workflow
+async function sendToRoboflow() {
+  if (!latestBase64) {
+    alert("No captured image. Capture or upload first.");
+    return;
+  }
+
+  setLoading(true);
+  resultsEl.innerHTML = ""; // clear
+
+  const payload = {
+    api_key: API_KEY,
+    inputs: {
+      image: { type: "base64", value: latestBase64 }
+    }
+  };
+
+  try {
+    const resp = await fetch(WORKFLOW_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!resp.ok) {
+      const text = await resp.text();
+      throw new Error(`Server returned ${resp.status}: ${text}`);
+    }
+
+    const json = await resp.json();
+    console.log("Roboflow response:", json);
+
+    const preds = extractPredictions(json);
+    if (!preds || preds.length === 0) {
+      resultsEl.innerHTML = '<div class="no-detect">No classes detected</div>';
+      setLoading(false);
+      return;
+    }
+
+    // sort by confidence desc if present
+    preds.sort((a,b) => (b.confidence||0) - (a.confidence||0));
+
+    // build html
+    const rows = preds.map(p => {
+      const cls = p.class || "(unknown)";
+      const score = (typeof p.confidence === 'number' ? (p.confidence*100).toFixed(0) + '%' : (p.score ? (p.score*100).toFixed(0)+'%' : ''));
+      return `<div class="class-row"><div class="class-name">${escapeHtml(cls)}</div><div class="class-score">${escapeHtml(score)}</div></div>`;
+    }).join('');
+
+    resultsEl.innerHTML = `<div style="font-weight:700; padding:6px 8px;">Detected classes (${preds.length})</div>${rows}`;
+  } catch (err) {
+    console.error("Error sending to Roboflow:", err);
+    resultsEl.innerHTML = `<div class="no-detect">Error: ${escapeHtml(err.message || String(err))}</div>`;
+  } finally {
+    setLoading(false);
+  }
 }
-    </script>
+
+// attach send button
+sendBtn.addEventListener('click', sendToRoboflow);
+
+// simple HTML-escape
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+</script>
+
 </body>
 </html>
